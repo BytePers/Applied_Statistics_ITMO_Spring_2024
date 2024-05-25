@@ -1,0 +1,159 @@
+---
+title: "HW4_Statistics"
+author: "Ratkevich Ilya"
+date: '15.05.2024'
+output: html_document
+---
+
+### Loading Libraries and Setting Up
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(readxl)
+library(vegan)
+library(ggvegan)
+library(psych)
+```
+
+### The Task
+You are tasked with assessing the effects of grazing on the zoobenthos of rivers on Tasmania. The goal is to identify which environmental factors most influence changes in the composition of flora and fauna.
+
+### EDA
+
+An explanation of the variables found in the `Grazing_Magierowski_et_al_2015.xls` dataset:
+
+### Fauna Data (`fauna` sheet)
+This sheet likely contains species composition data, detailing the presence, absence, or abundance of various zoobenthos species at each site. The specific columns would be species names or codes, with corresponding values indicating their observed quantities or presence.
+
+### Coordinates Data (`coord` sheet)
+1. **Latitude**: The latitude coordinate of the sampling site.
+2. **Longitude**: The longitude coordinate of the sampling site.
+3. Additional columns might include other locational data relevant to mapping or spatial analysis.
+
+### Raw Data (`raw` sheet)
+This sheet probably contains the original, unprocessed data from which the `env` and `fauna` sheets were derived. It might include raw measurements and observations, with possible additional metadata.
+
+### Explanation of Key Variables
+- **Abstraction, Regulation, and Grazing**: These variables capture human activities that can impact aquatic ecosystems by altering water availability, flow regimes, and introducing pollutants or physical disturbances.
+- **Fines, Temperature, Conductivity, AvgTurbidity, pH, Alkalinity, NitrateNitrite, DRP, N_total, P_total**: These are chemical and physical water quality parameters that influence habitat conditions for aquatic organisms.
+- **AvgShading, AvgAlgae, Chl**: These variables describe biological and physical features affecting light availability and primary productivity in the water.
+- **GrazingRank**: Provides a qualitative measure of the impact of grazing activities.
+
+These variables collectively help assess the impact of environmental stressors, particularly grazing, on the composition and health of aquatic ecosystems.
+
+### The Solution
+
+#### Loading Data
+
+```{r}
+# Load the data from Excel sheets
+fauna_data <- read_excel('Grazing_Magierowski_et_al_2015.xls', sheet = 'fauna')
+environmental_data <- read_excel('Grazing_Magierowski_et_al_2015.xls', sheet = 'env')
+```
+
+#### Data Preparation
+
+```{r}
+# Merge environmental and fauna data, then remove rows with missing values
+combined_data <- merge(environmental_data, fauna_data)
+
+clean_data <- na.omit(combined_data)
+
+#Normalize numerical data
+env_data_log <- data.frame(clean_data)
+env_data_log[,2:17] <- (clean_data[, 2:17])
+
+#make grazing rank numerical to see correlation
+env_data_log[,"GrazingRank"] <- as.numeric(as.factor(env_data_log[,"GrazingRank"]))
+colnames(env_data_log)[4:18] <- c("Grazing","Fines","Temperature","Conductivity",
+                                  "Turbidity","pH", "Alkalinity","Nitrate_Nitrite",
+                                  "DRP","N_total","P_total","Shading","Algae","Chl",
+                                  "Grazing_Rank"
+                                  )
+
+corPlot(env_data_log[,2:18], las=2)
+```
+
+**Observation:** 
+- 'Abstraction', 'Regulation', 'proportion of total area' and 'grazing rank' strongly correlate with each other, so it's better to use only one of them while building a model.
+- Average algae strongly correlates with 'Chl'.
+- 'Alkalinity' strongly correlates with 'Abstraction', 'Regulation', 'proportion of total area', 'grazing rank' and 'conductivity'
+- 'DRP' and 'P_total'
+- 'Temperature' correlates with 'N_total' and 'Conductivity', but not strongly enough
+
+Therefore, we can exclude:
+'Regulation', 'Grazing_Rank', 'DRP', 'Algae', 'Alcalinity'
+to avoid multicollinearity.
+
+
+### Canonical Correspondence Analysis (CCA)
+
+```{r}
+# Perform CCA
+cca_model <- cca(env_data_log[,19:length(env_data_log)] ~ Abstraction + Grazing + Fines + Temperature +
+                   Conductivity + Turbidity + pH + Nitrate_Nitrite + 
+                   N_total + P_total + Shading + Chl, data = env_data_log)
+
+# Check variance inflation factors (VIF) and summary of the CCA model
+vif.cca(cca_model)
+summary(cca_model)
+```
+
+### Visualization
+
+```{r}
+# Scree plot
+screeplot(cca_model, bstick = TRUE)
+
+# Plot CCA results
+autoplot(cca_model, scaling = "sites")
+plot(cca_model, scaling = "sites", main = "Scaling 1, 'Sites'")
+plot(cca_model, scaling = 2, display = c("species", "cn"), main = "Biplot CCA, Scaling 2")
+```
+
+It can be seen that species differ very much by turbidity, P_total, Conductivity, etc. They spread depending on these variables, and we can build a model based on these observations
+
+### Significance Testing
+
+```{r}
+# ANOVA for the CCA model
+
+anova(cca_model)
+anova(cca_model, by = "term")
+```
+
+**Observation:** 
+The model is significant (P = 0.001). The most important factors are `Abstraction`, `Temperature`, and `Turbidity`.
+
+### Model Refinement
+
+We will refine the model by removing highly correlated variables and checking the significance of additional interaction terms.
+
+```{r}
+# Refined CCA model
+refined_cca_model <- cca(env_data_log[,19:length(env_data_log)] ~ Abstraction*Grazing*Conductivity + Fines + 
+                   Temperature + Turbidity*pH + Nitrate_Nitrite + 
+                   N_total*P_total + Shading*Chl, data = env_data_log)
+
+# ANOVA for refined model
+anova(refined_cca_model)
+anova(refined_cca_model, by = "term")
+```
+
+**Observation:** 
+The refined model is valid. `Turbidity`, `Abstraction`, `Temperature`, `Conductivity`, and `P_total` are the most significant factors. Other variables can be excluded for the final model.
+
+### Final Model
+
+```{r}
+# Final CCA model
+final_cca_model <- cca(env_data_log[,19:length(env_data_log)] ~ Abstraction + Grazing:Abstraction + Conductivity + 
+                   Temperature + Turbidity + P_total, data = env_data_log)
+
+# ANOVA for final model
+anova(final_cca_model)
+anova(final_cca_model, by = "term")
+```
+
+### Conclusion
+The final analysis shows that `Abstraction`, `Conductivity`, 'Temperature', 'Turbidity' and `P_total` are the most significant factors influencing the zoobenthos composition in Tasmanian rivers. 

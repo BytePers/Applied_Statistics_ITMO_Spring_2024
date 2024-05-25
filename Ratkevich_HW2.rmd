@@ -1,0 +1,133 @@
+---
+title: "Statistics_HW2"
+author: "Ratkevich Ilya"
+date: '15.05.2024 '
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(golubEsets)
+library(vegan)
+library(ggplot2)
+library(ape)
+library(pvclust)
+```
+
+## Loading data
+
+```{r}
+# Load the data
+data(Golub_Merge)
+
+# Prepare the data
+gene_expression <- data.frame(Golub_Merge)[1:7129]
+
+# Group vector to check
+sample_groups <- Golub_Merge$ALL.AML
+
+# Normalize
+normalized_expression <- decostand(gene_expression, method = "log", MARGIN = 2)
+```
+
+## density plots for different distance metrics
+
+```{r}
+for (metric in c("euclidean", "canberra", "manhattan", "maximum", "binary", "minkowski")) {
+  
+  distance_vector <- as.vector(dist(normalized_expression, method = metric))
+  p <- ggplot(data.frame(distance_vector), aes(x = distance_vector)) +
+    geom_density(fill = "gray") +  
+    labs(x = "Distance", y = "Density", title = metric)
+  print(p)
+}
+```
+
+## Choosing best distance and clusterization method
+
+We simply repeat clustering with each of the variant and choose the one with maximum correlation coefficient from clust_dist() result
+
+```{r}
+clustering_results <- c()
+dist_methods <- c("euclidean", "manhattan", "canberra")
+cluster_methods <- c("average", "complete", "ward.D2", "single")
+  
+for (dist_m in dist_methods){
+  dist_matrix <- vegdist(normalized_expression, method = dist_m)
+    for (clust_m in cluster_methods) {
+    clustering_results[[paste(dist_m, clust_m, sep = "_")]] <- c(
+          "hierarchical_cluster" <-  hclust(dist_matrix, method = clust_m),
+          "phylo_tree" <-  as.phylo(hierarchical_cluster),
+          "cophenetic_dist" <- cophenetic(phylo_tree),
+          "correlation" <-  cor(dist_matrix, as.dist(cophenetic_dist)))
+    }
+}
+```
+
+```{r}
+# Function to perform clustering with different methods and distance metrics
+clust_dist <- function(data_matrix) {
+  clustering_results <- list()
+  
+  for (dist_m in c("euclidean", "manhattan", "canberra")) {
+    dist_matrix <- vegdist(data_matrix, method = dist_m)
+    
+    for (clust_m in c("average", "complete", "single")) {
+      result_key <- paste(dist_m, clust_m, sep = "_")
+      clustering_results[[result_key]] <- list(
+        distance_matrix = dist_matrix,
+        hierarchical_cluster = hclust(dist_matrix, method = clust_m),
+        phylo_tree = as.phylo(hclust(dist_matrix, method = clust_m)),
+        correlation = cor(dist_matrix, as.dist(cophenetic(phylo_tree)))
+      )
+    }
+  }
+  return(clustering_results)
+}
+
+# Perform clustering on normalized data
+clustering_results <- clust_dist(normalized_expression)
+
+# Create a data frame to store the correlation coefficients
+correlation_data <- do.call(rbind, lapply(names(clustering_results), function(result_key) {
+  methods <- strsplit(result_key, "_")[[1]]
+  data.frame(
+    Distance_Method = methods[1],
+    Clustering_Method = methods[2],
+    Correlation_Coefficient = clustering_results[[result_key]]$correlation
+  )
+}))
+
+
+best <- correlation_data[which.max(correlation_data$Correlation_Coefficient), ]
+#The best distance parameters are:
+print(paste(best[,1:2]))
+```
+
+
+```{r}
+dist_matrix <- vegdist(normalized_expression, method = "canberra")
+hierarchical_cluster <- hclust(dist_matrix, method = "average")
+phylo_tree <- as.phylo(hierarchical_cluster)
+group_status <- factor(Golub_Merge$ALL.AML, levels = c('AML', 'ALL'))
+tip_col <- ifelse(group_status == 'AML', 'dark green', 'dark red')
+  
+plot(phylo_tree, main = "Canberra, average", cex = 0.5, tip.color = tip_col)
+```
+
+
+```{r}
+bootstrap <- pvclust(t(normalized_expression),
+  method.hclust = 'average', method.dist = 'canberra',
+  nboot = 100, parallel = T, iseed=151)
+
+plot(bootstrap, cex=0.5)
+```
+
+We can see some outliers (# 12, 70, 41, 46, 44, 45). Bootstrap didn't change our tree much.
+
+Hierarchical Clustering: The original paper applied hierarchical clustering using different distance metrics (e.g., Euclidean distance) and linkage methods (e.g., complete linkage).The hierarchical clustering was able to distinguish between ALL and AML samples effectively. Most ALL samples clustered together, as did most AML samples, indicating clear separation between the two leukemia types based on gene expression profiles.
+
+
+Separation Between ALL and AML: Clustering analyses generally show a strong separation between ALL and AML samples, validating the original findings by Golub et al.
+Gene Expression Signatures: Specific gene expression patterns are consistently observed to be associated with each leukemia type, providing insights into the underlying biology of the diseases. Canberra distance clustering performs pretty well, though we could use euclidean as well.

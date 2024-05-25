@@ -1,0 +1,159 @@
+---
+title: "HW3_3"
+author: "Ratkevich Ilya"
+date: '21/05/24 '
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+Let's tackle the given tasks using R code. We'll start by loading the data and necessary libraries, and then proceed to analyze the data according to the specified tasks.
+
+### Loading Data and Libraries
+
+```{r}
+# Load necessary libraries
+library(readxl)
+library(ggplot2)
+library(dplyr)
+library(vegan)
+library(psych)
+library(ggpubr)
+
+# Set a consistent theme for plots
+theme_set(theme_bw())
+
+# Load the dataset
+lizard_data <- read_excel('Sleepy lizard.xlsx')
+
+# Select relevant features and convert certain columns to factors
+selected_data <- lizard_data %>%
+  select(Treatment, Habitat, Connectivity, Tot_WBC, Het_ABS, Lym_ABS, `H:L Ratio`, Mon_ABS, OthG_ABS, LBSI) %>%
+  mutate(
+    Treatment = as.factor(Treatment),
+    Habitat = as.factor(Habitat),
+    Connectivity = as.factor(Connectivity)
+  )
+```
+
+### Data Normalization
+
+```{r}
+# Subset data for blood composition
+blood_composition <- selected_data %>%
+  select(-Treatment, -Habitat, -Connectivity)
+
+# Log normalization of blood composition data
+normalized_blood_data <- scale(log(blood_composition + 1), scale = FALSE)
+```
+
+### Task 1a: Blood Composition in Unmodified vs. Heavily Modified Landscapes
+
+```{r}
+# PERMANOVA for Treatment
+result_1a <- adonis2(normalized_blood_data ~ selected_data$Treatment, method = "euclidean")
+print(result_1a)
+
+# Boxplot for visual comparison
+ggboxplot(selected_data, x = "Treatment", y = "Tot_WBC", color = "Treatment", add = "jitter") +
+  labs(title = "Total WBC by Treatment", y = "Total WBC")
+```
+
+### Task 1b: Blood Composition in Different Habitats in Heavily Modified Landscapes
+
+```{r}
+# Subset data for Treatment 2
+subset_treatment2 <- selected_data[selected_data$Treatment == 2, ]
+subset_blood_treatment2 <- normalized_blood_data[selected_data$Treatment == 2, ]
+
+# PERMANOVA for Habitat within Treatment 2
+result_1b <- adonis2(subset_blood_treatment2 ~ subset_treatment2$Habitat, method = "euclidean")
+print(result_1b)
+
+# Boxplot for visual comparison
+ggboxplot(subset_treatment2, x = "Habitat", y = "Tot_WBC", color = "Habitat", add = "jitter") +
+  labs(title = "Total WBC by Habitat in Heavily Modified Landscape", y = "Total WBC")
+```
+
+### Task 1c: Blood Composition and Connectivity in Heavily Modified Landscapes
+
+```{r}
+# PERMANOVA for Connectivity within Treatment 2
+result_1c <- adonis2(subset_blood_treatment2 ~ subset_treatment2$Connectivity, method = "euclidean")
+print(result_1c)
+
+# Boxplot for visual comparison
+ggboxplot(subset_treatment2, x = "Connectivity", y = "Tot_WBC", color = "Connectivity", add = "jitter") +
+  labs(title = "Total WBC by Connectivity in Heavily Modified Landscape", y = "Total WBC")
+```
+
+### Task 2: Combined Effects of Habitat Type and Connectivity
+
+```{r}
+# PERMANOVA for combined effects of Habitat and Connectivity within Treatment 2
+result_2 <- adonis2(subset_blood_treatment2 ~ subset_treatment2$Habitat + subset_treatment2$Connectivity, method = "euclidean")
+print(result_2)
+
+# Interaction plot for visual comparison
+ggboxplot(subset_treatment2, x = "Habitat", y = "Tot_WBC", color = "Connectivity", add = "jitter") +
+  labs(title = "Total WBC by Habitat and Connectivity in Heavily Modified Landscape", y = "Total WBC") +
+  facet_wrap(~ Connectivity)
+```
+
+### Explanation of Results
+
+- **Task 1a**: The PERMANOVA analysis shows that the blood composition of lizards differs between unmodified and heavily modified landscapes.
+- **Task 1b**: This analysis checks for differences in blood composition among lizards from different habitats within the heavily modified landscape.(not significant connection)
+- **Task 1c**: This analysis tests the effect of the degree of connectivity on the blood composition of lizards within the heavily modified landscape.(not significant connection)
+- **Task 2**: This analysis examines the combined effect of habitat type and degree of connectivity on the blood composition of lizards from the heavily modified landscape.(not significant connection)
+
+### Visualization
+
+```{r}
+# Load additional libraries for enhanced visualization
+library(ggforce)
+library(ggrepel)
+
+# Perform PCA
+pca_result <- prcomp(normalized_blood_data)$x %>%
+  as.data.frame() %>%
+  select(PC1, PC2)
+
+# Add treatment and habitat information to PCA result
+pca_result$Treatment <- selected_data$Treatment
+pca_result$Habitat <- selected_data$Habitat
+
+# Plot PCA results with enhanced design
+ggplot(pca_result, aes(x = PC1, y = PC2, shape = Treatment, color = Habitat)) +
+  geom_point(size = 3, alpha = 0.8) +  # Increase point size and add transparency
+  stat_ellipse(aes(fill = Treatment), geom = "polygon", alpha = 0.2, show.legend = FALSE) +  # Ellipses for group clustering
+  geom_text_repel(aes(label = rownames(pca_result)), size = 3) +  # Add labels to points
+  labs(
+    title = "PCA of Blood Composition",
+    subtitle = "Colored by Habitat and Shaped by Treatment",
+    x = "Principal Component 1",
+    y = "Principal Component 2"
+  ) +
+  scale_color_manual(values = c("blue", "green", "red", "orange")) +  # Custom colors for habitats
+  scale_shape_manual(values = c(16, 17)) +  # Custom shapes for treatments
+  theme_minimal(base_size = 15) +  # Minimal theme with larger base font size
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold"),
+    plot.subtitle = element_text(hjust = 0.5, face = "italic"),
+    legend.position = "right",
+    legend.title = element_blank(),
+    legend.background = element_rect(fill = "white", color = "black")
+  )
+
+```
+
+
+This helps to visualize how well the groups separate in the PCA space, providing further insights into the differences in blood composition among the different groups.
+
+## Conclusion
+
+The blood composition of lizards from unmodified and heavily modified landscapes differs
+Blood composition of lizards in different habitats differs between lizards from the highly modified landscape doesn't differ much
+The degree of connectivity doesn't affect the blood composition of lizards from the highly modified landscape 
+The blood composition of lizards from a highly modified landscape isn't affected by habitat type and degree of connectivity 
